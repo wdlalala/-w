@@ -1,0 +1,545 @@
+package com.syd.oden.gesturelock.view; 
+2 
+ 
+3 import android.content.Context; 
+4 import android.content.res.TypedArray; 
+5 import android.graphics.Canvas; 
+6 import android.graphics.Paint; 
+7 import android.graphics.Path; 
+8 import android.graphics.Point; 
+9 import android.util.AttributeSet; 
+10 import android.util.Log; 
+11 import android.view.MotionEvent; 
+12 import android.view.View; 
+13 import android.widget.RelativeLayout; 
+14 
+ 
+15 import com.syd.oden.gesturelock.R; 
+16 import com.syd.oden.gesturelock.view.GestureLockView.Mode; 
+17 import com.syd.oden.gesturelock.view.listener.GesturePasswordSettingListener; 
+18 import com.syd.oden.gesturelock.view.listener.GestureUnmatchedExceedListener; 
+19 import com.syd.oden.gesturelock.view.listener.GestureEventListener; 
+20 
+ 
+21 import java.util.ArrayList; 
+22 import java.util.List; 
+23 
+ 
+24 /** 
+25  * 整体包含n*n个GestureLockView,每个GestureLockView间间隔mMarginBetweenLockView， 
+26  * 最外层的GestureLockView与容器存在mMarginBetweenLockView的外边距 
+27  * <p/> 
+28  * 关于GestureLockView的边长（n*n）： n * mGestureLockViewWidth + ( n + 1 ) * 
+29  * mMarginBetweenLockView = mWidth ; 得：mGestureLockViewWidth = 4 * mWidth / ( 5 
+30  * * mCount + 1 ) 注：mMarginBetweenLockView = mGestureLockViewWidth * 0.25 ; 
+31  */ 
+32 public class GestureLockViewGroup extends RelativeLayout { 
+33 
+ 
+34     private static final String TAG = "GestureLockViewGroup"; 
+35     /** 
+36      * 保存所有的GestureLockView 
+37      */ 
+38     private GestureLockView[] mGestureLockViews; 
+39     /** 
+40      * 每个边上的GestureLockView的个数 
+41      */ 
+42     private int mCount = 3; 
+43     /** 
+44      * 存储答案 
+45      */ 
+46     private String password = ""; 
+47     /** 
+48      * 保存用户选中的GestureLockView的id 
+49      */ 
+50     private List<Integer> mChoose = new ArrayList<Integer>(); 
+51     private String mChooseString = ""; 
+52 
+ 
+53     private Paint mPaint; 
+54     /** 
+55      * 每个GestureLockView中间的间距 设置为：mGestureLockViewWidth * 25% 
+56      */ 
+57     private int mMarginBetweenLockView = 30; 
+58     /** 
+59      * GestureLockView的边长 4 * mWidth / ( 5 * mCount + 1 ) 
+60      */ 
+61     private int mGestureLockViewWidth; 
+62 
+ 
+63     /** 
+64      * GestureLockView无手指触摸的状态下圆的颜色 
+65      */ 
+66     private int mNoFingerColor = 0xFF378FC9; 
+67 
+ 
+68     /** 
+69      * GestureLockView手指触摸的状态下圆的颜色 
+70      */ 
+71     private int mFingerOnColor = 0XFFEC159F; 
+72     /** 
+73      * GestureLockView手指抬起的状态下,正确时圆的颜色 
+74      */ 
+75     private int mFingerUpColorCorrect = 0xFF91DC5A; 
+76 
+ 
+77     /** 
+78      * GestureLockView手指抬起的状态下，错误圆的颜色 
+79      */ 
+80     private int mFingerUpColorError = 0xFFFF0000; 
+81     /** 
+82      * 宽度 
+83      */ 
+84     private int mWidth; 
+85     /** 
+86      * 高度 
+87      */ 
+88     private int mHeight; 
+89 
+ 
+90     private Path mPath; 
+91     /** 
+92      * 指引线的开始位置x 
+93      */ 
+94     private int mLastPathX; 
+95     /** 
+96      * 指引线的开始位置y 
+97      */ 
+98     private int mLastPathY; 
+99     /** 
+100      * 指引下的结束位置 
+101      */ 
+102     private Point mTmpTarget = new Point(); 
+103 
+ 
+104     /** 
+105      * 最大尝试次数 
+106      */ 
+107     private int mTryTimes = -1; 
+108     public static boolean isCorrect = false; 
+109 
+ 
+110     /** 
+111      * 回调接口 
+112      */ 
+113     private GesturePasswordSettingListener gesturePasswordSettingListener; 
+114     private GestureEventListener gestureEventListener; 
+115     private GestureUnmatchedExceedListener gestureUnmatchedExceedListener; 
+116 
+ 
+117     private GesturePreference gesturePreference; 
+118     private boolean isSetPassword = false; 
+119     private boolean isInPasswordSettingMode = false; 
+120     private boolean isWaitForFirstInput = true; 
+121     private boolean isRetryTimeLimit = false; 
+122     private String firstInputPassword = ""; 
+123     private int mPrferenceId = -1; 
+124 
+ 
+125     public GestureLockViewGroup(Context context, AttributeSet attrs) { 
+126         this(context, attrs, 0); 
+127     } 
+128 
+ 
+129     public GestureLockViewGroup(Context context, AttributeSet attrs, 
+130                                 int defStyle) { 
+131         super(context, attrs, defStyle); 
+132 
+ 
+133         /** 
+134          * 获得所有自定义的参数的值 
+135          */ 
+136         TypedArray a = context.obtainStyledAttributes(attrs, 
+137                 R.styleable.GestureLockViewGroup, defStyle, 0); 
+138 
+ 
+139         mNoFingerColor = a.getColor(R.styleable.GestureLockViewGroup_color_no_finger, mNoFingerColor); 
+140         mFingerOnColor = a.getColor(R.styleable.GestureLockViewGroup_color_finger_on, mFingerOnColor); 
+141         mFingerUpColorCorrect = a.getColor(R.styleable.GestureLockViewGroup_color_finger_up_correct, mFingerUpColorCorrect); 
+142         mFingerUpColorError = a.getColor(R.styleable.GestureLockViewGroup_color_finger_up_error, mFingerUpColorError); 
+143         mCount = a.getInt(R.styleable.GestureLockViewGroup_count, mCount); 
+144         mPrferenceId = a.getInt(R.styleable.GestureLockViewGroup_preference_id, mPrferenceId); 
+145 
+ 
+146         a.recycle(); 
+147 
+ 
+148         /** 
+149          * 获取密码状态 
+150          */ 
+151         gesturePreference = new GesturePreference(context, mPrferenceId); 
+152         password = gesturePreference.ReadStringPreference(); 
+153         Log.d(TAG, "password now is : " + password); 
+154         isSetPassword = !password.equals("null"); //判断是否已经保存有密码 
+155         isInPasswordSettingMode = !isSetPassword;     //当未设置密码，进入密码设置模式 
+156 
+ 
+157         // 初始化画笔 
+158         mPaint = new Paint(Paint.ANTI_ALIAS_FLAG); 
+159         mPaint.setStyle(Paint.Style.STROKE); 
+160         mPaint.setStrokeCap(Paint.Cap.ROUND); 
+161         mPaint.setStrokeJoin(Paint.Join.ROUND); 
+162         mPath = new Path(); 
+163     } 
+164 
+ 
+165     @Override 
+166     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) { 
+167         super.onMeasure(widthMeasureSpec, heightMeasureSpec); 
+168 
+ 
+169         mWidth = MeasureSpec.getSize(widthMeasureSpec); 
+170         mHeight = MeasureSpec.getSize(heightMeasureSpec); 
+171 
+ 
+172         mHeight = mWidth = mWidth < mHeight ? mWidth : mHeight; 
+173         initViews(); 
+174     } 
+175 
+ 
+176     private void initViews() { 
+177         // 初始化mGestureLockViews 
+178         if (mGestureLockViews == null) { 
+179             mGestureLockViews = new GestureLockView[mCount * mCount]; 
+180             // 计算每个GestureLockView的宽度 
+181             mGestureLockViewWidth = (int) (4 * mWidth * 1.0f / (5 * mCount + 1)); 
+182             //计算每个GestureLockView的间距 
+183             mMarginBetweenLockView = (int) (mGestureLockViewWidth * 0.25); 
+184             // 设置画笔的宽度为GestureLockView的内圆直径稍微小点 
+185             mPaint.setStrokeWidth(mGestureLockViewWidth * 0.29f); 
+186 
+ 
+187             for (int i = 0; i < mGestureLockViews.length; i++) { 
+188                 //初始化每个GestureLockView 
+189                 mGestureLockViews[i] = new GestureLockView(getContext(), mNoFingerColor, mFingerOnColor, mFingerUpColorCorrect, mFingerUpColorError); 
+190                 mGestureLockViews[i].setId(i + 1); 
+191                 //设置参数，主要是定位GestureLockView间的位置 
+192                 RelativeLayout.LayoutParams lockerParams = new RelativeLayout.LayoutParams( 
+193                         mGestureLockViewWidth, mGestureLockViewWidth); 
+194 
+ 
+195                 // 不是每行的第一个，则设置位置为前一个的右边 
+196                 if (i % mCount != 0) { 
+197                     lockerParams.addRule(RelativeLayout.RIGHT_OF, 
+198                             mGestureLockViews[i - 1].getId()); 
+199                 } 
+200                 // 从第二行开始，设置为上一行同一位置View的下面 
+201                 if (i > mCount - 1) { 
+202                     lockerParams.addRule(RelativeLayout.BELOW, 
+203                             mGestureLockViews[i - mCount].getId()); 
+204                 } 
+205                 //设置右下左上的边距 
+206                 int rightMargin = mMarginBetweenLockView; 
+207                 int bottomMargin = mMarginBetweenLockView; 
+208                 int leftMagin = 0; 
+209                 int topMargin = 0; 
+210                 /** 
+211                  * 每个View都有右外边距和底外边距 第一行的有上外边距 第一列的有左外边距 
+212                  */ 
+213                 if (i >= 0 && i < mCount)// 第一行 
+214                 { 
+215                     topMargin = mMarginBetweenLockView; 
+216                 } 
+217                 if (i % mCount == 0)// 第一列 
+218                 { 
+219                     leftMagin = mMarginBetweenLockView; 
+220                 } 
+221 
+ 
+222                 lockerParams.setMargins(leftMagin, topMargin, rightMargin, 
+223                         bottomMargin); 
+224                 mGestureLockViews[i].setMode(Mode.STATUS_NO_FINGER); 
+225                 addView(mGestureLockViews[i], lockerParams); 
+226             } 
+227         } 
+228     } 
+229 
+ 
+230     @Override 
+231     public boolean onTouchEvent(MotionEvent event) { 
+232         int action = event.getAction(); 
+233         int x = (int) event.getX(); 
+234         int y = (int) event.getY(); 
+235         Log.d(TAG, "mTryTimes : " + mTryTimes); 
+236 
+ 
+237         //重试次数超过限制，直接返回 
+238         if (mTryTimes <= 0 && isRetryTimeLimit) { 
+239             return true; 
+240         } 
+241 
+ 
+242         switch (action) { 
+243             case MotionEvent.ACTION_DOWN: 
+244                 reset();     // 重置 
+245                 break; 
+246             case MotionEvent.ACTION_MOVE: 
+247                 drawAndGetSelectedWhenTouchMove(x, y); 
+248                 break; 
+249             case MotionEvent.ACTION_UP: 
+250                 if (isInPasswordSettingMode) { 
+251                     if (gesturePasswordSettingListener != null) 
+252                         setPasswordHandle();  //设置密码 
+253                 } else { 
+254                     if (mChoose.size() > 0) { 
+255                         isCorrect = checkAnswer(); 
+256                     } else { 
+257                         return true; 
+258                     } 
+259 
+ 
+260                     if (gestureEventListener != null) { 
+261                         gestureEventListener.onGestureEvent(isCorrect);  //将结果回调 
+262                     } 
+263                     if (this.mTryTimes == 0) { 
+264                         gestureUnmatchedExceedListener.onUnmatchedExceedBoundary();  //超出重试次数，进入回调 
+265                     } 
+266                 } 
+267                 drawWhenTouchUp(); 
+268                 break; 
+269         } 
+270         invalidate(); 
+271         return true; 
+272     } 
+273 
+ 
+274     private void drawAndGetSelectedWhenTouchMove(int x, int y) { 
+275         mPaint.setColor(mFingerOnColor); 
+276         mPaint.setAlpha(50); 
+277         GestureLockView child = getChildIdByPos(x, y); 
+278         if (child != null) { 
+279             int cId = child.getId(); 
+280             if (!mChoose.contains(cId)) { 
+281                 mChoose.add(cId); 
+282                 mChooseString = mChooseString + cId; 
+283                 child.setMode(Mode.STATUS_FINGER_ON); 
+284                 // 设置指引线的起点 
+285                 mLastPathX = child.getLeft() / 2 + child.getRight() / 2; 
+286                 mLastPathY = child.getTop() / 2 + child.getBottom() / 2; 
+287 
+ 
+288                 if (mChoose.size() == 1)// 当前添加为第一个 
+289                 { 
+290                     mPath.moveTo(mLastPathX, mLastPathY); 
+291                 } else 
+292                 // 非第一个，将两者使用线连上 
+293                 { 
+294                     mPath.lineTo(mLastPathX, mLastPathY); 
+295                 } 
+296             } 
+297         } 
+298         // 指引线的终点 
+299         mTmpTarget.x = x; 
+300         mTmpTarget.y = y; 
+301     } 
+302 
+ 
+303     private void drawWhenTouchUp() { 
+304         if (isCorrect) { 
+305             mPaint.setColor(mFingerUpColorCorrect); 
+306         } else { 
+307             mPaint.setColor(mFingerUpColorError); 
+308         } 
+309         mPaint.setAlpha(50); 
+310         Log.d(TAG, "mChoose = " + mChoose); 
+311         // 将终点设置位置为起点，即取消指引线 
+312         mTmpTarget.x = mLastPathX; 
+313         mTmpTarget.y = mLastPathY; 
+314 
+ 
+315         // 改变子元素的状态为UP 
+316         setItemModeUp(); 
+317 
+ 
+318         // 计算每个元素中箭头需要旋转的角度 
+319         for (int i = 0; i + 1 < mChoose.size(); i++) { 
+320             int childId = mChoose.get(i); 
+321             int nextChildId = mChoose.get(i + 1); 
+322 
+ 
+323             GestureLockView startChild = (GestureLockView) findViewById(childId); 
+324             GestureLockView nextChild = (GestureLockView) findViewById(nextChildId); 
+325 
+ 
+326             int dx = nextChild.getLeft() - startChild.getLeft(); 
+327             int dy = nextChild.getTop() - startChild.getTop(); 
+328             // 计算角度 
+329             int angle = (int) Math.toDegrees(Math.atan2(dy, dx)) + 90; 
+330             startChild.setArrowDegree(angle); 
+331         } 
+332     } 
+333 
+ 
+334     private void setPasswordHandle() { 
+335         if (isWaitForFirstInput) { 
+336             if (gesturePasswordSettingListener.onFirstInputComplete(mChooseString.length())) { 
+337                 firstInputPassword = mChooseString; 
+338                 isWaitForFirstInput = false; 
+339             } 
+340         } else { 
+341             if (firstInputPassword.equals(mChooseString)) { 
+342                 gesturePasswordSettingListener.onSuccess(); 
+343                 savePassword(mChooseString); 
+344                 isInPasswordSettingMode = false; 
+345             } else { 
+346                 gesturePasswordSettingListener.onFail(); 
+347             } 
+348         } 
+349         reset(); 
+350     } 
+351 
+ 
+352     private void setItemModeUp() { 
+353         for (GestureLockView gestureLockView : mGestureLockViews) { 
+354             if (mChoose.contains(gestureLockView.getId())) { 
+355                 gestureLockView.setMode(Mode.STATUS_FINGER_UP); 
+356             } 
+357         } 
+358     } 
+359 
+ 
+360     /** 
+361      * 检查用户绘制的手势是否正确 
+362      * 
+363      * @return 
+364      */ 
+365     public boolean checkAnswer() { 
+366         if (password.equals(mChooseString)) { 
+367             return true; 
+368         } else { 
+369             if (isRetryTimeLimit) 
+370                 this.mTryTimes--; 
+371             return false; 
+372         } 
+373     } 
+374 
+ 
+375     /** 
+376      * 通过x,y获得落入的GestureLockView 
+377      * 
+378      * @param x 
+379      * @param y 
+380      * @return 
+381      */ 
+382     private GestureLockView getChildIdByPos(int x, int y) { 
+383         for (GestureLockView gestureLockView : mGestureLockViews) { 
+384             if (checkPositionInChild(gestureLockView, x, y)) { 
+385                 return gestureLockView; 
+386             } 
+387         } 
+388         return null; 
+389     } 
+390 
+ 
+391     /** 
+392      * 检查当前是否在child中 
+393      * 
+394      * @param child 
+395      * @param x 
+396      * @param y 
+397      * @return 
+398      */ 
+399     private boolean checkPositionInChild(View child, int x, int y) { 
+400 
+ 
+401         //设置了内边距，即x,y必须落入下GestureLockView的内部中间的小区域中，可以通过调整padding使得x,y落入范围变大，或者不设置padding 
+402         int padding = (int) (mGestureLockViewWidth * 0.15); 
+403 
+ 
+404         if (x >= child.getLeft() + padding && x <= child.getRight() - padding 
+405                 && y >= child.getTop() + padding 
+406                 && y <= child.getBottom() - padding) { 
+407             return true; 
+408         } 
+409         return false; 
+410     } 
+411 
+ 
+412     @Override 
+413     public void dispatchDraw(Canvas canvas) { 
+414         super.dispatchDraw(canvas); 
+415         //绘制GestureLockView间的连线 
+416         if (mPath != null) { 
+417             canvas.drawPath(mPath, mPaint); 
+418         } 
+419         //绘制指引线 
+420         if (mChoose.size() > 0) { 
+421             if (mLastPathX != 0 && mLastPathY != 0) 
+422                 canvas.drawLine(mLastPathX, mLastPathY, mTmpTarget.x, 
+423                         mTmpTarget.y, mPaint); 
+424         } 
+425     } 
+426 
+ 
+427     /** 
+428      * 做一些必要的重置 
+429      */ 
+430     private void reset() { 
+431         mChoose.clear(); 
+432         mChooseString = ""; 
+433         mPath.reset(); 
+434         for (GestureLockView gestureLockView : mGestureLockViews) { 
+435             gestureLockView.setMode(Mode.STATUS_NO_FINGER); 
+436             gestureLockView.setArrowDegree(-1); 
+437         } 
+438     } 
+439 
+ 
+440 
+ 
+441     //对外公开的一些方法 
+442 
+ 
+443     public void setGestureEventListener(GestureEventListener gestureEventListener) { 
+444         this.gestureEventListener = gestureEventListener; 
+445     } 
+446 
+ 
+447     public void setGestureUnmatchedExceedListener(int retryTimes, GestureUnmatchedExceedListener gestureUnmatchedExceedListener) { 
+448         isRetryTimeLimit = true; 
+449         this.mTryTimes = retryTimes; 
+450         this.gestureUnmatchedExceedListener = gestureUnmatchedExceedListener; 
+451     } 
+452 
+ 
+453     public void setGesturePasswordSettingListener(GesturePasswordSettingListener gesturePasswordSettingListener) { 
+454         this.gesturePasswordSettingListener = gesturePasswordSettingListener; 
+455     } 
+456 
+ 
+457     public void removePassword() { 
+458         gesturePreference.WriteStringPreference("null"); 
+459         this.isSetPassword = false; 
+460         isWaitForFirstInput = true; 
+461         isInPasswordSettingMode = true; 
+462     } 
+463 
+ 
+464     public void savePassword(String password) { 
+465         this.password = password; 
+466         gesturePreference.WriteStringPreference(password); 
+467     } 
+468 
+ 
+469     public String getPassword() { 
+470         return password; 
+471     } 
+472 
+ 
+473     public void resetView() { 
+474         reset(); 
+475         invalidate(); 
+476     } 
+477 
+ 
+478     public void setRetryTimes(int retryTimes) { 
+479         this.mTryTimes = retryTimes; 
+480     } 
+481 
+ 
+482     public boolean isSetPassword() { 
+483         return isSetPassword; 
+484     } 
+485 
+ 
+486 } 
